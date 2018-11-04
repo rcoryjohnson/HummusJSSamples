@@ -27,7 +27,10 @@ function collectWidgetAnnotations(reader, pageDictionary) {
             var isWidget =  annotationObject.queryObject('Subtype').toString() == 'Widget';
             if(isWidget) {
                 // find the appearance xobject id that represents this annoation appearance
-                var apDictionary = reader.queryDictionaryObject(annotationObject,'AP').toPDFDictionary();
+                let apPDFObject = reader.queryDictionaryObject(annotationObject,'AP');
+                if (!apPDFObject)
+                    continue;
+                var apDictionary = apPDFObject.toPDFDictionary();
                 var nAppearances = reader.queryDictionaryObject(apDictionary,'N');
                 if(nAppearances.getType() === hummus.ePDFObjectDictionary) {
                     var nAppearancesDict = nAppearances.toPDFDictionary().toJSObject();
@@ -55,9 +58,9 @@ function collectWidgetAnnotations(reader, pageDictionary) {
                     })
             }
         }
-    } 
-    
-    return widgetAnnotatons;   
+    }
+
+    return widgetAnnotatons;
 }
 
 function writeNewXObjectsWithPrefix(xobjects, prefix,widgetAnnoations) {
@@ -122,7 +125,7 @@ function getDifferentChar(inCharCode) {
     if(inCharCode == 0x5a)
         return 0x41;
 
-    return 0x41;    
+    return 0x41;
 }
 
 function writeModifiedResourcesDict(handles, resources, widgetAnnoations) {
@@ -132,7 +135,7 @@ function writeModifiedResourcesDict(handles, resources, widgetAnnoations) {
     var copyingContext = handles.copyingContext;
 
     var modifiedResourcesDict = startModifiedDictionary(handles,resources,{'XObject':-1})
-    
+
     if(resources.exists('XObject')){
         modifiedResourcesDict.writeKey('XObject');
         xobjects = objectsContext.startDictionary();
@@ -146,12 +149,12 @@ function writeModifiedResourcesDict(handles, resources, widgetAnnoations) {
             newObjectPrefix += String.fromCharCode(getDifferentChar((name.length >= i+1) ? name.charCodeAt(i): 0x39));
             ++i;
         });
-        
+
         results = writeNewXObjectsWithPrefix(xobjects,newObjectPrefix, widgetAnnoations);
         objectsContext.endDictionary(xobjects);
     }
     else {
-        results = writeNewXObjectDict(resources,objectsContext,widgetAnnoations);
+        results = writeNewXObjectDict(modifiedResourcesDict,objectsContext,widgetAnnoations);
     }
     objectsContext
         .endDictionary(modifiedResourcesDict)
@@ -162,8 +165,8 @@ function writeModifiedResourcesDict(handles, resources, widgetAnnoations) {
 function writeToStreamCxt(streamCxt,str) {
     var bytes = [];
     for (var i = 0; i < str.length; ++i) {
-      var code = str.charCodeAt(i);
-      bytes = bytes.concat([code]);
+        var code = str.charCodeAt(i);
+        bytes = bytes.concat([code]);
     }
     streamCxt.getWriteStream().write(bytes)
 }
@@ -175,10 +178,10 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
     var objectsContext = handles.objectsContext;
     var copyingContext = handles.copyingContext;
     var reader = handles.reader;
-    
+
 
     // rewrite page object. we'll need to remove the widget annotations, create new content overlay
-    // and add annotation forms to the page resources dict...easy 
+    // and add annotation forms to the page resources dict...easy
     objectsContext.startModifiedIndirectObject(pageObjectId);
     modifiedPageDictionary = startModifiedDictionary(handles,pageDictionary,{'Annots':-1, 'Resources': -1, 'Contents': -1});
 
@@ -201,7 +204,7 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
     // Content IDs that we'll use to introduce new overlay (the pre one is just to protect the matrix)
     var preContent = objectsContext.allocateNewObjectID();
     var postContent = objectsContext.allocateNewObjectID();
-    
+
     var existingContentsStreamsIds = [];
     if(pageDictionary.exists('Contents')) {
         var contents = reader.queryDictionaryObject(pageDictionary,'Contents')
@@ -215,7 +218,7 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
             // multiple content streams. get all object ids
             var contentsArray = reader.queryDictionaryObject(pageDictionary,'Contents').toPDFArray();
             for(var i = 0; i < annotationsArray.getLength();++i) {
-                existingContentsStreamsIds.push(contentsArray.queryObject(i).toPDFIndirectObjectReference().getObjectID());   
+                existingContentsStreamsIds.push(contentsArray.queryObject(i).toPDFIndirectObjectReference().getObjectID());
             }
         }
     }
@@ -229,7 +232,7 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
     objectsContext.writeIndirectObjectReference(postContent);
     objectsContext.endArray();
     objectsContext.endLine();
-    
+
     // 3. write new resources dict with the new resources. this part is a bit annoying with all the various options
     modifiedPageDictionary.writeKey('Resources');
     if(pageDictionary.exists('Resources')) {
@@ -253,7 +256,7 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
 
     objectsContext
         .endDictionary(modifiedPageDictionary)
-        .endIndirectObject();    
+        .endIndirectObject();
 
     // now write the new overlay placing all the widget annoation forms
 
@@ -273,7 +276,7 @@ function lockWidgetAnnotationsForPage(handles,pageObjectId,pageDictionary,widget
     // iterate widget annotations and write their placement code
     widgetAnnotatons.forEach(function(item){
         writeToStreamCxt(postStreamCxt,"q\r\n");
-        writeToStreamCxt(postStreamCxt,"1 0 0 1 " + item.rect[0] + " " + item.rect[1] + " cm\r\n");                
+        writeToStreamCxt(postStreamCxt,"1 0 0 1 " + item.rect[0] + " " + item.rect[1] + " cm\r\n");
         writeToStreamCxt(postStreamCxt,"/" + item.name + " Do\r\n");
         writeToStreamCxt(postStreamCxt,"Q\r\n");
     });
@@ -286,7 +289,7 @@ var BUFFER_SIZE = 10000;
 function convertWidgetAnnotationsToForm(handles,widgetAnnoations) {
     var reader = handles.reader;
     var objectsContext = handles.objectsContext;
-    
+
     // just make sure that the widget annotation can qualify as a form xobject (just that it has type and subtype...sometimes they don't)
     widgetAnnoations.forEach(function(item){
         var xobjectStream = reader.parseNewObject(item.id).toPDFStream();
@@ -303,10 +306,10 @@ function convertWidgetAnnotationsToForm(handles,widgetAnnoations) {
             var readStream = reader.startReadingFromStream(xobjectStream);
             while(readStream.notEnded())
             {
-              var readData = readStream.read(BUFFER_SIZE);
-              streamWriteStream.write(readData);
+                var readData = readStream.read(BUFFER_SIZE);
+                streamWriteStream.write(readData);
             }
-                
+
             objectsContext.endPDFStream(streamCxt);
             objectsContext.endIndirectObject();
         }
@@ -324,7 +327,7 @@ function lockPages(handles) {
         var widgetAnnotatons = collectWidgetAnnotations(reader,pageDictionary)
         convertWidgetAnnotationsToForm(handles,widgetAnnotatons);
         lockWidgetAnnotationsForPage(handles,reader.getPageObjectID(i),pageDictionary,widgetAnnotatons);
-    }    
+    }
 }
 
 function removeForm(handles) {
@@ -346,9 +349,9 @@ function removeForm(handles) {
         var acroformObjectId = acroformInCatalog.toPDFIndirectObjectReference().getObjectID();
         objectsContext.deleteObject(acroformObjectId);
     }
-    
+
 }
-    
+
 
 function lockForm(writer) {
     var handles = {
